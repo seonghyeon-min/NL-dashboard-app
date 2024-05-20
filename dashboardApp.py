@@ -25,7 +25,7 @@ def load_data(file) :
 
     # data = pd.read_csv('./file/KIC_LOG_30.csv')
     file_bytes = BytesIO(file.getvalue())
-    data = pd.read_csv(file)
+    data = pd.read_csv(file_bytes)
     data = data.fillna('None')
     
     exception_fw_version = ['03.30.09', '03.30.15', '03.30.21', '03.30.22', '03.30.23', '03.30.24']
