@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import altair as alt
-import time, re, json
+import time, re, json, os
 import moduleHandler
 
 # page Configuration
@@ -24,8 +24,8 @@ alt.themes.enable("dark")
 def load_data(file) :
 
     # data = pd.read_csv('./file/KIC_LOG_30.csv')
-    file_bytes = BytesIO(file.getvalue())
-    data = pd.read_csv(file_bytes)
+    # file_bytes = BytesIO(file.getvalue())
+    data = pd.read_csv(file)
     data = data.fillna('None')
     
     exception_fw_version = ['03.30.09', '03.30.15', '03.30.21', '03.30.22', '03.30.23', '03.30.24']
@@ -223,7 +223,7 @@ def main() :
     uploaded_files = st.sidebar.file_uploader("Choose a CSV file", accept_multiple_files=True, type=['csv'])
     if uploaded_files is not None :
         data_frames = []
-        for file in uploaded_files:
+        for file in uploaded_files :
             data = load_data(file)
             data_frames.append(data)
         
@@ -251,5 +251,34 @@ def main() :
             if selectedContext != '' :
                 displayMoudleDataAnalysis(filterData, selectedMsgId)
                 
+def test_main() :
+    set_page_config()
+    
+    #UploadedFile = st.sidebar.file_uploader("Upload Log file (csv)")
+    testfilePath = f'{os.getcwd()}/resource/KIC_LOG_30.csv'
+    data = load_data(testfilePath)
+    
+    st.title("📊 Log Dashboard")
+    startDate, endDate, selectedContext, selectedMsgId = displaySidebar(data)
+        
+    query_expr = "(context_name == @selectedContext)"
+    filterData = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+        
+    datetimeRange = pd.date_range(startDate, endDate)
+    query_expr = "log_date in @datetimeRange"
+    filterData = filterData.query(query_expr)
+        
+    TotalLogCount, TotalModule, TotalUser, TopModuleData = calculateKpis(data)
+    kpiNames = ["All Events", "All Moduels",'Total User', TopModuleData[0][0]]
+    displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, TopModuleData[0][1], kpiNames)
+    displayTrendChart(data)
+    st.divider()
+    
+    displayTop10Module(data, selectedContext, selectedMsgId)
+
+    if selectedContext != '' :
+        displayMoudleDataAnalysis(filterData, selectedMsgId)
+            
 if __name__ == '__main__' :
-    main()
+    # main()
+    test_main()
