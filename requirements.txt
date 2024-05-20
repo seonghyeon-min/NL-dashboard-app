@@ -1,0 +1,7 @@
+pandas
+plotly
+altair
+wordcloud
+nltk
+konlpy
+matplotlib
