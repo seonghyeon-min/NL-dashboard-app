@@ -24,7 +24,7 @@ alt.themes.enable("dark")
 def load_data(file) :
 
     # data = pd.read_csv('./file/KIC_LOG_30.csv')
-    # file_bytes = BytesIO(file.getvalue())
+    file_bytes = BytesIO(file.getvalue())
     data = pd.read_csv(file)
     data = data.fillna('None')
     
@@ -250,35 +250,6 @@ def main() :
 
             if selectedContext != '' :
                 displayMoudleDataAnalysis(filterData, selectedMsgId)
-                
-def test_main() :
-    set_page_config()
-    
-    #UploadedFile = st.sidebar.file_uploader("Upload Log file (csv)")
-    testfilePath = f'{os.getcwd()}/resource/KIC_LOG_30.csv'
-    data = load_data(testfilePath)
-    
-    st.title("📊 Log Dashboard")
-    startDate, endDate, selectedContext, selectedMsgId = displaySidebar(data)
-        
-    query_expr = "(context_name == @selectedContext)"
-    filterData = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
-        
-    datetimeRange = pd.date_range(startDate, endDate)
-    query_expr = "log_date in @datetimeRange"
-    filterData = filterData.query(query_expr)
-        
-    TotalLogCount, TotalModule, TotalUser, TopModuleData = calculateKpis(data)
-    kpiNames = ["All Events", "All Moduels",'Total User', TopModuleData[0][0]]
-    displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, TopModuleData[0][1], kpiNames)
-    displayTrendChart(data)
-    st.divider()
-    
-    displayTop10Module(data, selectedContext, selectedMsgId)
-
-    if selectedContext != '' :
-        displayMoudleDataAnalysis(filterData, selectedMsgId)
             
 if __name__ == '__main__' :
-    # main()
-    test_main()
+    main()
