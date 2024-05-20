@@ -26,6 +26,11 @@ def load_data(file) :
     # data = pd.read_csv('./file/KIC_LOG_30.csv')
     file_bytes = BytesIO(file.getvalue())
     data = pd.read_csv(file_bytes)
+    if checkEmptyData(data) :
+        st.warning('EmptyDataError (pandas.erros.EmptyDataError), check file.', 
+                    icon="🚨")
+        
+        
     data = data.fillna('None')
     
     exception_fw_version = ['03.30.09', '03.30.15', '03.30.21', '03.30.22', '03.30.23', '03.30.24']
@@ -54,6 +59,10 @@ def load_data(file) :
     
     return data
 
+def checkEmptyData(data) :
+    if data.empty :
+        return True
+    
 def getMessageData(x) :
     messageDatalist = []
     valuelst = list(x.values())
@@ -214,7 +223,6 @@ def analysisData(module, data, msg='') :
         moduleHandler.nudgeHandler(data, messageId)
     if contextName == 'AppInstallD' :
         moduleHandler.appInstallHandler(data, messageId)
-        
         
 def main() :
     set_page_config()
