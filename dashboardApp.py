@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -22,13 +23,16 @@ alt.themes.enable("dark")
 # Data load
 @st.cache_data(ttl=24*60*60)
 def load_data(file) :
-
     # data = pd.read_csv('./file/KIC_LOG_30.csv')
     file_bytes = BytesIO(file.getvalue())
-    data = pd.read_csv(file_bytes)
-    if checkEmptyData(data) :
+    
+    try :
+        data = pd.read_csv(file_bytes, low_memory=False)
+    except :
         st.warning('EmptyDataError (pandas.erros.EmptyDataError), check file.', 
                     icon="🚨")
+        
+        return pd.DataFrame()
         
         
     data = data.fillna('None')
@@ -49,20 +53,19 @@ def load_data(file) :
         
     data['message_data'] = data[col].to_dict(orient='records')
     data['message_data'] = data['message_data'].apply(lambda x : getMessageData(x))
-    data['log_date'] = data['log_time'].apply(lambda x : x.split(' ')[0])
+    
     data['log_time'] = pd.to_datetime(data['log_time'])
-    data['log_date'] = pd.to_datetime(data['log_date'])
+    data = data.rename(columns={'log_time':'log_date'})
+    
+    # data['log_date'] = data['log_time'].apply(lambda x : x.split(' ')[0])
+    # data['log_time'] = pd.to_datetime(data['log_time'])
+    # data['log_date'] = pd.to_datetime(data['log_date'])
     
     query_expr = "fw_version in @exception_fw_version"
     data = data.query(query_expr)
-    
-    
+
     return data
 
-def checkEmptyData(data) :
-    if data.empty :
-        return True
-    
 def getMessageData(x) :
     messageDatalist = []
     valuelst = list(x.values())
@@ -73,12 +76,18 @@ def getMessageData(x) :
     messageData = dict(messageDatalist)
     return messageData  
 
-def displayKpiMetrics(TotalLogCount, TotalModule, TopModuleData, BottomModuleData, kpiNames) :
+def displayKpiMetrics(TotalLogCount, TotalModule, TopUserData, TotalErrorCount, kpiNames) :
     st.header("KPI Metrics")
-    kpivalueforMetrics = [TotalLogCount, TotalModule, TopModuleData, BottomModuleData]
+    kpivalueforMetrics = [TotalLogCount, TotalModule, TopUserData, TotalErrorCount]
         
     for i, (col, (kpi_name, kpi_value)) in enumerate(zip(st.columns(4), zip(kpiNames, kpivalueforMetrics))) :
-        col.metric(label=kpi_name, value=kpi_value, delta=kpi_value)
+        if kpi_name == 'Error Log' :
+            if kpi_value == 0 :
+                col.metric(label=kpi_name, value=kpi_value, delta=None)
+            else :
+                col.metric(label=kpi_name, value=kpi_value, delta=-kpi_value)
+        else :
+            col.metric(label=kpi_name, value=kpi_value, delta=kpi_value)
 
 
 @st.cache_data(ttl=24*60*60)
@@ -86,10 +95,17 @@ def calculateKpis(data) :
     TotalLogCount = len(data)
     TotalModule = len(data['context_name'].unique())
     TotalUser = len(data['DEVICE_ID'].unique())
-    TopModuleData = data['context_name'].value_counts().reset_index().sort_values(by='count', ascending=False).iloc[:1].values.tolist()
+    
+    # faultManager : errorLog
+    try :
+        faultModuleData = len(data[data['context_name'] == 'faultmanager'])
+    except :
+        faultModuleData = 0
+        
+    # TopModuleData = data['context_name'].value_counts().reset_index().sort_values(by='count', ascending=False).iloc[:1].values.tolist()
     # BottomModuleData = data['Context Name'].value_counts().reset_index().sort_values(by='count', ascending=True).iloc[:1].values.tolist()
     
-    return (TotalLogCount, TotalModule, TotalUser, TopModuleData)
+    return (TotalLogCount, TotalModule, TotalUser, faultModuleData)
     
 # sidebar
 def displaySidebar(data) :
@@ -106,9 +122,8 @@ def displaySidebar(data) :
     msgIDlist.insert(0, '') 
     selectedMsgId = st.sidebar.selectbox('Select a Message ID', msgIDlist)
     
-    startDate = startDate.strftime('%Y-%m-%d')
-    endDate = endDate.strftime('%Y-%m-%d')
-
+    # startDate = startDate.strftime('%Y-%m-%d')
+    # endDate = endDate.strftime('%Y-%m-%d')
 
     return (startDate, endDate, selectedContext, selectedMsgId)
 
@@ -120,14 +135,26 @@ def displayDonut(data) :
     
     st.plotly_chart(fig, theme='streamlit', use_container_width=True)
     
+    
+    
+# =============================================================================================== #
 @st.cache_data(ttl=24*60*60)    
 def displayTrendChart(data) :
-    pxData = data['log_date'].value_counts().reset_index()
-    fig = px.area(pxData, x='log_date', y='count', title='Log Trend')
-    fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+    data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
+    pxData = data['log_date_dt'].value_counts().reset_index()
+    pxData = pxData.sort_values(by='log_date_dt', ascending=True)
+    
+    fig = px.area(pxData, x='log_date_dt', y='count', title='Log Trend')
+    fig.update_layout(margin=dict(l=20, r=20, t=50, b=20), 
+                        xaxis_title = 'Date',
+                        yaxis_title = 'Count')
     fig.update_xaxes(rangemode='tozero', showgrid=False)
     fig.update_yaxes(rangemode='tozero', showgrid=True)
     st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+    
+# ================================================================================================== #
+    
+    
     
 def displayTop10Module(data, ctxtName, msgID) :
     displayProgressBar()
@@ -183,8 +210,10 @@ def displayMoudleDataAnalysis(data, msg) :
     
     # regardless all msg..,
     with container : 
-        pxData = data[['log_date', 'message_id']].value_counts().reset_index().sort_values(by='log_date', ascending=True)
-        fig = px.line(pxData, x='log_date', y='count', color='message_id', title=f'{module} Trend', markers=True)
+        data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
+        pxData = data[['log_date_dt', 'message_id']].value_counts().reset_index().sort_values(by='log_date_dt', ascending=True)
+        
+        fig = px.line(pxData, x='log_date_dt', y='count', color='message_id', title=f'{module} Trend', markers=True)
         fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
         fig.update_xaxes(rangemode='tozero', showgrid=False)
         fig.update_yaxes(rangemode='tozero', showgrid=True)
@@ -201,7 +230,6 @@ def displayMoudleDataAnalysis(data, msg) :
     else :
         with container :
             analysisData(module, data)
-
 
 def analysisData(module, data, msg='') :
     contextName = module
@@ -226,31 +254,47 @@ def analysisData(module, data, msg='') :
         
 def main() :
     set_page_config()
-    
+    st.title("📊 Log Dashboard")
     #UploadedFile = st.sidebar.file_uploader("Upload Log file (csv)")
-    uploaded_files = st.sidebar.file_uploader("Choose a CSV file", accept_multiple_files=True, type=['csv'])
-    if uploaded_files is not None :
-        data_frames = []
-        for file in uploaded_files :
-            data = load_data(file)
-            data_frames.append(data)
         
+    uploaded_files = st.sidebar.file_uploader("Choose a CSV file", accept_multiple_files=True, type=['csv'])
+    
+    if uploaded_files == [] :
+        st.info('This Application is for analysis with Normal log. To use this app, please input normal log csv files!')
+        
+    elif uploaded_files is not None :
+        data_frames = []
+
+        with st.spinner('Wait for the data with analysis.....') :
+            for file in uploaded_files :
+                data = load_data(file)
+        
+                if data.empty :
+                    return 
+
+                data_frames.append(data)
+
         if data_frames:
             data = pd.concat(data_frames, ignore_index=True)
             
-            st.title("📊 Log Dashboard")
             startDate, endDate, selectedContext, selectedMsgId = displaySidebar(data)
                 
             query_expr = "(context_name == @selectedContext)"
             filterData = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
-                
+            
+            filterData['log_date_dt'] = pd.to_datetime(filterData['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d')))
+
             datetimeRange = pd.date_range(startDate, endDate)
-            query_expr = "log_date in @datetimeRange"
+        
+            query_expr = "log_date_dt in @datetimeRange"
             filterData = filterData.query(query_expr)
-                
-            TotalLogCount, TotalModule, TotalUser, TopModuleData = calculateKpis(data)
-            kpiNames = ["All Events", "All Moduels",'Total User', TopModuleData[0][0]]
-            displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, TopModuleData[0][1], kpiNames)
+            
+                    
+            # TotalLogCount, TotalModule, TotalUser, TopModuleData = calculateKpis(data)
+            TotalLogCount, TotalModule, TotalUser, ErrorLogCount = calculateKpis(data)
+            kpiNames = ["All Events", "All Moduels",'Total User', 'Error Log']
+            # kpiNames = ["All Events", "All Moduels",'Total User', TopModuleData[0][0]]
+            displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, ErrorLogCount, kpiNames)
             displayTrendChart(data)
             st.divider()
             
@@ -260,4 +304,8 @@ def main() :
                 displayMoudleDataAnalysis(filterData, selectedMsgId)
             
 if __name__ == '__main__' :
-    main()
+    try :
+        main()
+    except Exception as err :
+        st.warning(f"🚨 Error has happend while operating dashboard")
+        st.warning(f"{err}")

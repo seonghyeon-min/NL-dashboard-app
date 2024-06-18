@@ -312,7 +312,7 @@ def homeconnectHandler(data, msg) :
         
         hc_fig = px.bar(data_frame=homeconnectUsability, x='count', y='message_id', orientation='h', text_auto=True)
         
-        hc_fig.update_traces(textfont_size=21, textfont_color='red')
+        hc_fig.update_traces(textfont_size=15, textfont_color='red')
         hc_fig.update_layout(title="HomeConnect Usability", 
                     xaxis_title = "count",
                     yaxis_title = "service",
@@ -421,13 +421,18 @@ def appInstallHandler(data, msg) :
         appInstalledData = set_keyData(data, msg)
         appInstallPopularity = appInstalledData['app_id'].value_counts().reset_index().sort_values(by='count')
         appInstalledLst = appInstalledData['app_id'].unique()
-        appDeletedData = set_keyData(data, 'NL_APP_REMOVED')
-        appDeletedUsability = appDeletedData['app_id'].value_counts().reset_index().sort_values(by='count')
-        appDeletedLst = appDeletedData['app_id'].unique()
         
-        commonAppLst = [app for app in appDeletedLst if app in appInstalledLst]
-        commonAppdiscount = appDeletedUsability.query("app_id in @commonAppLst")['count'].values.tolist()
-        commonAppdiscount = [(-value) for value in commonAppdiscount]
+        appDeletedData = set_keyData(data, 'NL_APP_REMOVED')
+        try :
+            appDeletedUsability = appDeletedData['app_id'].value_counts().reset_index().sort_values(by='count')
+            appDeletedLst = appDeletedData['app_id'].unique()
+        except :
+            appDeletedLst = []
+        
+        if len(appDeletedLst) > 0 :
+            commonAppLst = [app for app in appDeletedLst if app in appInstalledLst]
+            commonAppdiscount = appDeletedUsability.query("app_id in @commonAppLst")['count'].values.tolist()
+            commonAppdiscount = [(-value) for value in commonAppdiscount]
         
         #installed
         appPop_fig = go.Figure(data=[go.Bar(
@@ -440,13 +445,14 @@ def appInstallHandler(data, msg) :
         )])
         
         #Removed
-        appPop_fig.add_trace(go.Bar(
-            x=commonAppLst, 
-            y=commonAppdiscount, 
-            text=commonAppdiscount, 
-            textposition='outside',
-            marker_color='cadetblue',
-            name='removed'))
+        if len(appDeletedLst) > 0 :
+            appPop_fig.add_trace(go.Bar(
+                x=commonAppLst, 
+                y=commonAppdiscount, 
+                text=commonAppdiscount, 
+                textposition='outside',
+                marker_color='cadetblue',
+                name='removed'))
 
         appPop_fig.update_layout(title='App Popularity',
                                     xaxis_title = "app_id",
