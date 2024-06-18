@@ -486,6 +486,7 @@ def set_keyData(data, msg) :
         keylst = list(moduleData['message_data'].iloc[0].keys())
     except :
         return
+    
     stdIdx = moduleData.columns.get_loc('message_data')
     
     for loc in range(len(keylst)) :

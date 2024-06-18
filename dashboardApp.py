@@ -156,9 +156,9 @@ def displayTrendChart(data) :
     
     
     
-def displayTop10Module(data, ctxtName, msgID) :
+def displayTop10(data) :
     displayProgressBar()
-    print(f'msgid : {msgID}')
+
     TopModuleUseData = data['context_name'].value_counts().reset_index().sort_values(by='count', ascending=False).iloc[:10,]
     
     col1, col2 = st.columns(2) 
@@ -176,18 +176,52 @@ def displayTop10Module(data, ctxtName, msgID) :
             
     with col2 :
         container = st.container(border=True, height=450)
-        with container :            
-            if (ctxtName != '') and (msgID != '') :
-                query_expr = "(context_name == @ctxtName and message_id == @msgID)"
-                showDataframe = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+        with container :         
+            # show top 10 apps usablity
+            ctxtName, messageId = 'SAM', 'NL_APP_LAUNCH_BEGIN'
+            query_expr = "(context_name == @ctxtName and message_id == @messageId)"
             
-            if (ctxtName != '') and (msgID == '') :
-                showDataframe = data.query("(context_name == @ctxtName)")[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+            df = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
             
-            elif (ctxtName == '') and (msgID == '') :
-                showDataframe = data[['log_date', 'context_name', 'message_id', 'message_data']].sort_values(by='log_date', ascending=True).reset_index(drop=True)
+            keylst = list(df['message_data'].iloc[0].keys())
+            stdIdx = df.columns.get_loc('message_data')
+            
+            
+            for loc in range(len(keylst)) :
+                df.insert(stdIdx+loc+1,
+                keylst[loc],
+                df['message_data'].apply(lambda x : x.get(keylst[loc], 'None')))
+    
+            df = df.replace('', pd.NA).dropna()
+            
+            appUse_df = df['app_id'].value_counts().reset_index().sort_values(by='count', ascending=False).iloc[:10, :]
+            
+            appUse_fig = go.Figure(data=[go.Bar(
+                x = appUse_df['count'].values.tolist(),
+                y = appUse_df['app_id'].values.tolist(),
+                marker_color = 'crimson',
+                orientation='h'
+            )])
+            
+            appUse_fig.update_layout(title='Top 10 : App Usability',
+                            xaxis_title = "count",
+                            yaxis_title = "App_id")
+                            # height=700,
+                            # uniformtext_minsize=8, uniformtext_mode='hide')
+            
+            st.plotly_chart(appUse_fig, theme='streamlit', use_container_width=True)
+            
+            # if (ctxtName != '') and (msgID != '') :
+            #     query_expr = "(context_name == @ctxtName and message_id == @msgID)"
+            #     showDataframe = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+            
+            # if (ctxtName != '') and (msgID == '') :
+            #     showDataframe = data.query("(context_name == @ctxtName)")[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+            
+            # elif (ctxtName == '') and (msgID == '') :
+            #     showDataframe = data[['log_date', 'context_name', 'message_id', 'message_data']].sort_values(by='log_date', ascending=True).reset_index(drop=True)
                 
-            st.dataframe(showDataframe, use_container_width=True)
+            # st.dataframe(figdf, use_container_width=True)
                                     
 def displayProgressBar() :
     progress_text = "Operation in progress. Please wait."
@@ -214,7 +248,9 @@ def displayMoudleDataAnalysis(data, msg) :
         pxData = data[['log_date_dt', 'message_id']].value_counts().reset_index().sort_values(by='log_date_dt', ascending=True)
         
         fig = px.line(pxData, x='log_date_dt', y='count', color='message_id', title=f'{module} Trend', markers=True)
-        fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+        fig.update_layout(margin=dict(l=20, r=20, t=50, b=20),
+                        xaxis_title = 'Date',
+                        yaxis_title = 'Count')
         fig.update_xaxes(rangemode='tozero', showgrid=False)
         fig.update_yaxes(rangemode='tozero', showgrid=True)
         st.plotly_chart(fig, theme='streamlit', use_container_width=True)
@@ -298,7 +334,7 @@ def main() :
             displayTrendChart(data)
             st.divider()
             
-            displayTop10Module(data, selectedContext, selectedMsgId)
+            displayTop10(data)
 
             if selectedContext != '' :
                 displayMoudleDataAnalysis(filterData, selectedMsgId)
