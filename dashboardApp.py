@@ -85,7 +85,7 @@ def displayKpiMetrics(TotalLogCount, TotalModule, TopUserData, TotalErrorCount, 
             if kpi_value == 0 :
                 col.metric(label=kpi_name, value=kpi_value, delta=None)
             else :
-                col.metric(label=kpi_name, value=kpi_value, delta=-kpi_value)
+                col.metric(label=kpi_name, value=kpi_value, delta=kpi_value, delta_color='inverse')
         else :
             col.metric(label=kpi_name, value=kpi_value, delta=kpi_value)
 
@@ -151,11 +151,65 @@ def displayTrendChart(data) :
     fig.update_xaxes(rangemode='tozero', showgrid=False)
     fig.update_yaxes(rangemode='tozero', showgrid=True)
     st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+
+@st.cache_data(ttl=24*60*60)
+def displayChoropleth(data):
+    col1, col2 = st.columns((7.5,5))
+    with col1 :
+        import geopandas as gpd
+        
+        with open('country.json') as f:
+            js = json.loads(f.read())
+        
+        cntryCode = pd.DataFrame(js, columns=['country2Code', 'country3Code'])
+        
+        world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+        countryData = data['country'].value_counts().reset_index()
+
+        world_cntryCode = world.merge(cntryCode, left_on='iso_a3', right_on='country3Code')
+        world_cntryData = world_cntryCode.merge(countryData, left_on = 'country2Code', right_on='country')[['continent', 'name', 'country2Code', 'country3Code', 'count', 'geometry']]
+
+        choropleth = px.choropleth(world_cntryData,
+                                    locations='country3Code',
+                                    color_continuous_scale=px.colors.sequential.Plasma,
+                                    color='count',
+                                    locationmode="ISO-3")
+        
+        
+        choropleth.update_layout(
+            title='Country Log count',
+            template='plotly_dark',
+            plot_bgcolor='rgba(0, 0, 0, 0)',
+            paper_bgcolor='rgba(0, 0, 0, 0)',
+            margin=dict(l=0, r=0, t=25, b=0),
+            height=600,
+            width=2000
+        )
+        
+        st.plotly_chart(choropleth, use_container_width=True)
     
+    with col2 :
+        world_df = world_cntryData[['continent', 'name', 'country2Code', 'country3Code', 'count']].sort_values(by='count', ascending=False)
+        st.dataframe(world_df,
+                        column_order=('name', 'count'),
+                        hide_index=True,
+                        column_config={
+                            "name" : 
+                                st.column_config.TextColumn(
+                                    "Country",
+                                    width='medium'
+                                    ),
+                            "count" : st.column_config.ProgressColumn(
+                                "Usability",
+                                format="%f",
+                                min_value=0,
+                                max_value=max(world_df['count']),
+                            )},
+                        use_container_width=True)
+
 # ================================================================================================== #
     
-    
-    
+
 def displayTop10(data) :
     displayProgressBar()
 
@@ -222,6 +276,22 @@ def displayTop10(data) :
             #     showDataframe = data[['log_date', 'context_name', 'message_id', 'message_data']].sort_values(by='log_date', ascending=True).reset_index(drop=True)
                 
             # st.dataframe(figdf, use_container_width=True)
+            
+def displayHomeUsabilty(data) :
+    pass
+            
+def displayRawData(data) :
+    text_input = st.text_input(
+                "Enter some string Text 👇",
+                placeholder="Write string that you want to filter"
+    )
+    
+    if text_input :       
+        pass
+    else :
+        st.dataframe(data, use_container_width=True)
+    
+    
                                     
 def displayProgressBar() :
     progress_text = "Operation in progress. Please wait."
@@ -333,12 +403,24 @@ def main() :
             displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, ErrorLogCount, kpiNames)
             displayTrendChart(data)
             st.divider()
-            
+            # Choropleth Map
+            displayChoropleth(data)
+            st.divider()
+
             displayTop10(data)
+            displayHomeUsabilty(data)
+            
+            
+            show_container = st.container(border=True)
+            with show_container :
+                isModified = st.checkbox("Show Raw-Data")
+                if isModified : 
+                    displayRawData(data)
+                    
 
             if selectedContext != '' :
                 displayMoudleDataAnalysis(filterData, selectedMsgId)
-            
+
 if __name__ == '__main__' :
     try :
         main()
