@@ -5,3 +5,4 @@ wordcloud
 nltk
 konlpy
 matplotlib
+geopandas
