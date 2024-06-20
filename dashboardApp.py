@@ -85,7 +85,7 @@ def displayKpiMetrics(TotalLogCount, TotalModule, TopUserData, TotalErrorCount, 
             if kpi_value == 0 :
                 col.metric(label=kpi_name, value=kpi_value, delta=None)
             else :
-                col.metric(label=kpi_name, value=kpi_value, delta=kpi_value, delta_color='inverse')
+                col.metric(label=kpi_name, value=kpi_value, delta=-kpi_value)
         else :
             col.metric(label=kpi_name, value=kpi_value, delta=kpi_value)
 
@@ -111,8 +111,14 @@ def calculateKpis(data) :
 def displaySidebar(data) :
     st.sidebar.header("Filters")
     
+    print(data)
+    
     startDate = pd.Timestamp(st.sidebar.date_input("Start date", data['log_date'].min().date()))
     endDate = pd.Timestamp(st.sidebar.date_input("End date", data['log_date'].max().date()))
+    
+    webosVersion = list(data['platform'].unique())
+    webosVersion.insert(0, 'All')
+    selectedVersion = st.sidebar.selectbox('Select a webOS Version', webosVersion)
     
     ctxtlist = list(data['context_name'].unique())
     ctxtlist.insert(0, '')
@@ -122,10 +128,7 @@ def displaySidebar(data) :
     msgIDlist.insert(0, '') 
     selectedMsgId = st.sidebar.selectbox('Select a Message ID', msgIDlist)
     
-    # startDate = startDate.strftime('%Y-%m-%d')
-    # endDate = endDate.strftime('%Y-%m-%d')
-
-    return (startDate, endDate, selectedContext, selectedMsgId)
+    return (startDate, endDate, selectedContext, selectedMsgId, selectedVersion)
 
 def displayDonut(data) :
     fig = px.pie(data, names='context_name', values='count', hole=.3)
@@ -138,20 +141,22 @@ def displayDonut(data) :
     
     
 # =============================================================================================== #
+
 @st.cache_data(ttl=24*60*60)    
 def displayTrendChart(data) :
-    data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
+    # data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
     pxData = data['log_date_dt'].value_counts().reset_index()
     pxData = pxData.sort_values(by='log_date_dt', ascending=True)
     
-    fig = px.area(pxData, x='log_date_dt', y='count', title='Log Trend')
+    fig = px.line(pxData, x='log_date_dt', y='count', title='Log Trend', markers=True, text='count')   
+    fig.update_traces(textposition='top center')
     fig.update_layout(margin=dict(l=20, r=20, t=50, b=20), 
                         xaxis_title = 'Date',
                         yaxis_title = 'Count')
     fig.update_xaxes(rangemode='tozero', showgrid=False)
     fig.update_yaxes(rangemode='tozero', showgrid=True)
     st.plotly_chart(fig, theme='streamlit', use_container_width=True)
-
+    
 @st.cache_data(ttl=24*60*60)
 def displayChoropleth(data):
     col1, col2 = st.columns((7.5,5))
@@ -206,10 +211,11 @@ def displayChoropleth(data):
                                 max_value=max(world_df['count']),
                             )},
                         use_container_width=True)
-
+    
 # ================================================================================================== #
     
-
+    
+    
 def displayTop10(data) :
     displayProgressBar()
 
@@ -230,7 +236,7 @@ def displayTop10(data) :
             
     with col2 :
         container = st.container(border=True, height=450)
-        with container :         
+        with container :
             # show top 10 apps usablity
             ctxtName, messageId = 'SAM', 'NL_APP_LAUNCH_BEGIN'
             query_expr = "(context_name == @ctxtName and message_id == @messageId)"
@@ -264,35 +270,37 @@ def displayTop10(data) :
                             # uniformtext_minsize=8, uniformtext_mode='hide')
             
             st.plotly_chart(appUse_fig, theme='streamlit', use_container_width=True)
+
             
-            # if (ctxtName != '') and (msgID != '') :
-            #     query_expr = "(context_name == @ctxtName and message_id == @msgID)"
-            #     showDataframe = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
-            
-            # if (ctxtName != '') and (msgID == '') :
-            #     showDataframe = data.query("(context_name == @ctxtName)")[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
-            
-            # elif (ctxtName == '') and (msgID == '') :
-            #     showDataframe = data[['log_date', 'context_name', 'message_id', 'message_data']].sort_values(by='log_date', ascending=True).reset_index(drop=True)
-                
-            # st.dataframe(figdf, use_container_width=True)
-            
-def displayHomeUsabilty(data) :
-    pass
-            
+@st.cache_data(experimental_allow_widgets=True)
 def displayRawData(data) :
-    text_input = st.text_input(
-                "Enter some string Text 👇",
-                placeholder="Write string that you want to filter"
-    )
+    filterCols = ['country', 'context_name', 'message_id']
+    exceptionCols = ['message_key_1', 'message_value_1',
+        'message_key_2', 'message_value_2', 
+        'message_key_3', 'message_value_3',
+        'message_key_4', 'message_value_4', 
+        'message_key_5', 'message_value_5',
+        'message_key_6', 'message_value_6', 
+        'message_key_7', 'message_value_7',
+        'message_key_8', 'message_value_8', 
+        'message_key_9', 'message_value_9',
+        'message_key_10', 'message_value_10']
     
-    if text_input :       
-        pass
-    else :
-        st.dataframe(data, use_container_width=True)
+    dispCols = [col for col in data.columns if col not in exceptionCols]
     
     
-                                    
+    contextFilter = st.multiselect("👇 Filter Columns", filterCols)
+    for col in contextFilter :
+        left, right = st.columns((1,20))
+        user_input = right.multiselect(
+            f" 👇 Values for {col}",
+            data[col].unique()
+        )
+        data = data[data[col].isin(user_input)][dispCols]
+        
+    st.dataframe(data, use_container_width=True)
+
+
 def displayProgressBar() :
     progress_text = "Operation in progress. Please wait."
     my_bar = st.progress(0, text=progress_text)
@@ -310,7 +318,7 @@ def displayMoudleDataAnalysis(data, msg) :
         return
 
     msg = msg
-    container = st.container(border=True)
+    container = st.container(border=False)
     
     # regardless all msg..,
     with container : 
@@ -357,6 +365,8 @@ def analysisData(module, data, msg='') :
         moduleHandler.nudgeHandler(data, messageId)
     if contextName == 'AppInstallD' :
         moduleHandler.appInstallHandler(data, messageId)
+    if contextName == 'com.webos.app.quicksettings' :
+        moduleHandler.quicksettingsHandler(data, messageId) 
         
 def main() :
     set_page_config()
@@ -382,48 +392,73 @@ def main() :
 
         if data_frames:
             data = pd.concat(data_frames, ignore_index=True)
+            data.insert(data.columns.get_loc('log_date'), 'log_date_dt', 
+                                pd.to_datetime(data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))))
             
-            startDate, endDate, selectedContext, selectedMsgId = displaySidebar(data)
+            startDate, endDate, selectedContext, selectedMsgId, selectedVersion = displaySidebar(data)
+            datetimeRange = pd.date_range(startDate, endDate)
+            
+            # context Name not selected
+            # webOS version 에 따른 DP
+            if selectedVersion != 'All' :
+                query_expr = "(platform in @selectedVersion) and (log_date_dt in @datetimeRange)"
+                
+            else :
+                query_expr = "log_date_dt in @datetimeRange"
+                
+                
+            query_data = data.query(query_expr)
+                
+            if selectedContext == '' :
+                #KPIs Metrics
+                TotalLogCount, TotalModule, TotalUser, ErrorLogCount = calculateKpis(query_data)
+                kpiNames = ["All Events", "All Moduels",'Total User', 'Error Log']
+                displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, ErrorLogCount, kpiNames)
+                
+                            
+                # log flow chart
+                displayTrendChart(query_data)
+                st.divider()
+                
+                # Choropleth Map
+                displayChoropleth(query_data)
+                st.divider()
+                
+                
+                # Top10 usage index (rank 10 : stack log module, App usage Idx by SAM)
+                displayTop10(query_data)
+                
+                container = st.container(border=True)
+                with container :
+                    moduleHandler.quicksettingsHandler(data, 'NL_QUICKSETTINGS_VALUE')
+                    
+            # context Name selected    
+            # ========================================================================== #
                 
             query_expr = "(context_name == @selectedContext)"
-            filterData = data.query(query_expr)[['log_date', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+            filterData = query_data.query(query_expr)[['log_date', 'platform' , 'country', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
             
-            filterData['log_date_dt'] = pd.to_datetime(filterData['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d')))
+            if selectedContext != '' :
+                displayMoudleDataAnalysis(filterData, selectedMsgId)
+            # else:
+            #     container = st.container(border=True)
+            #     with container :
+            #         moduleHandler.quicksettingsHandler(data, 'NL_QUICKSETTINGS_VALUE')
+                
 
-            datetimeRange = pd.date_range(startDate, endDate)
-        
-            query_expr = "log_date_dt in @datetimeRange"
-            filterData = filterData.query(query_expr)
             
-                    
-            # TotalLogCount, TotalModule, TotalUser, TopModuleData = calculateKpis(data)
-            TotalLogCount, TotalModule, TotalUser, ErrorLogCount = calculateKpis(data)
-            kpiNames = ["All Events", "All Moduels",'Total User', 'Error Log']
-            # kpiNames = ["All Events", "All Moduels",'Total User', TopModuleData[0][0]]
-            displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, ErrorLogCount, kpiNames)
-            displayTrendChart(data)
-            st.divider()
-            # Choropleth Map
-            displayChoropleth(data)
-            st.divider()
-
-            displayTop10(data)
-            displayHomeUsabilty(data)
-            
-            
+            # regardless contextName seleceted or not.
             show_container = st.container(border=True)
             with show_container :
                 isModified = st.checkbox("Show Raw-Data")
                 if isModified : 
                     displayRawData(data)
-                    
-
-            if selectedContext != '' :
-                displayMoudleDataAnalysis(filterData, selectedMsgId)
-
+                
+                
+                
 if __name__ == '__main__' :
     try :
         main()
     except Exception as err :
         st.warning(f"🚨 Error has happend while operating dashboard")
-        st.warning(f"{err}")
+        st.exception(f"{err}")
