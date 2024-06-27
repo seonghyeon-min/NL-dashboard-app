@@ -1,6 +1,9 @@
+from st_circular_progress import CircularProgress
+from streamlit_echarts import st_echarts
 from datetime import datetime
 from io import BytesIO
 
+import json
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -8,6 +11,7 @@ import streamlit as st
 import altair as alt
 import time, re, json, os
 import moduleHandler
+import streamlit_shadcn_ui as ui
 
 # page Configuration
 def set_page_config() :
@@ -76,18 +80,19 @@ def getMessageData(x) :
     messageData = dict(messageDatalist)
     return messageData  
 
+# @st.cache_data(ttl=24*60*60)
 def displayKpiMetrics(TotalLogCount, TotalModule, TopUserData, TotalErrorCount, kpiNames) :
     st.header("KPI Metrics")
     kpivalueforMetrics = [TotalLogCount, TotalModule, TopUserData, TotalErrorCount]
-        
+    descriptionforMectrics = [
+        "Total Logs Count",
+        "Used Modules Count",
+        "Unique Device ID",
+        "caused by FaultManager"
+    ]
     for i, (col, (kpi_name, kpi_value)) in enumerate(zip(st.columns(4), zip(kpiNames, kpivalueforMetrics))) :
-        if kpi_name == 'Error Log' :
-            if kpi_value == 0 :
-                col.metric(label=kpi_name, value=kpi_value, delta=None)
-            else :
-                col.metric(label=kpi_name, value=kpi_value, delta=-kpi_value)
-        else :
-            col.metric(label=kpi_name, value=kpi_value, delta=kpi_value)
+        with col :
+            ui.metric_card(title=kpi_name, content=kpi_value, description=descriptionforMectrics[i])
 
 
 @st.cache_data(ttl=24*60*60)
@@ -110,8 +115,6 @@ def calculateKpis(data) :
 # sidebar
 def displaySidebar(data) :
     st.sidebar.header("Filters")
-    
-    print(data)
     
     startDate = pd.Timestamp(st.sidebar.date_input("Start date", data['log_date'].min().date()))
     endDate = pd.Timestamp(st.sidebar.date_input("End date", data['log_date'].max().date()))
@@ -138,24 +141,80 @@ def displayDonut(data) :
     
     st.plotly_chart(fig, theme='streamlit', use_container_width=True)
     
-    
-    
+
 # =============================================================================================== #
 
-@st.cache_data(ttl=24*60*60)    
+# @st.cache_data(ttl=24*60*60)    
 def displayTrendChart(data) :
     # data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
-    pxData = data['log_date_dt'].value_counts().reset_index()
-    pxData = pxData.sort_values(by='log_date_dt', ascending=True)
+    # ===================== using ECharts ================================================ #
+
     
-    fig = px.line(pxData, x='log_date_dt', y='count', title='Log Trend', markers=True, text='count')   
-    fig.update_traces(textposition='top center')
-    fig.update_layout(margin=dict(l=20, r=20, t=50, b=20), 
-                        xaxis_title = 'Date',
-                        yaxis_title = 'Count')
-    fig.update_xaxes(rangemode='tozero', showgrid=False)
-    fig.update_yaxes(rangemode='tozero', showgrid=True)
-    st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+    TimeSeriesData = data['log_date_dt'].value_counts().reset_index().sort_values(by='log_date_dt', ascending=True)
+
+    TimeSeriesData['log_date_dt'] = TimeSeriesData['log_date_dt'].apply(str).str.split(' ').str[0]
+    xdata = TimeSeriesData['log_date_dt'].values.tolist()
+    ydata = TimeSeriesData['count'].values.tolist()
+    
+    data = [[time, count] for time, count in zip(xdata, ydata)]
+
+    
+    options = {
+        "tooltip" : {
+            "trigger" : "axis"
+        },
+        "title" : {
+            "text" : "Log Trend",
+            "textStyle" : {
+                "color" : "#fff"
+                    }
+        },
+        "toolbox" :{
+            "feature" : {
+                "saveAsImage" : {}
+            }
+        },
+        "xAxis" : {
+            "type" : "category",
+            "data" : xdata,
+            "boundaryGap" : True
+        },
+        "yAxis" : {
+            "type" : "value"
+        },
+        "series" : [
+            {
+                "name" : "Log by TimeSeries",
+                "type" : "line",
+                "smooth" : True,
+                "symbol" : 'none',
+                "areaStyle" : {},
+                "data" : ydata
+            }
+        ],
+        "grid" : {
+            "left" : "5%",
+            "right" : "2%",
+            "bottom" : "10%"
+        }
+        
+    }
+    
+    st_echarts(options=options, height="400px", width="2400px")
+    
+    
+    # ===================================================================================== #
+    # pxData = data['log_date_dt'].value_counts().reset_index()
+    # pxData = pxData.sort_values(by='log_date_dt', ascending=True)
+    
+    # fig = px.line(pxData, x='log_date_dt', y='count', title='Log Trend', markers=True, text='count')   
+    # fig.update_traces(textposition='top center')
+    # fig.update_layout(margin=dict(l=20, r=20, t=50, b=20), 
+    #                     xaxis_title = 'Date',
+    #                     yaxis_title = 'Count')
+    # fig.update_xaxes(rangemode='tozero', showgrid=False)
+    # fig.update_yaxes(rangemode='tozero', showgrid=True)
+    # st.plotly_chart(fig, theme='streamlit', use_container_width=True)
     
 @st.cache_data(ttl=24*60*60)
 def displayChoropleth(data):
@@ -213,9 +272,8 @@ def displayChoropleth(data):
                         use_container_width=True)
     
 # ================================================================================================== #
-    
-    
-    
+
+# @st.cache_data(ttl=24*60*60)
 def displayTop10(data) :
     displayProgressBar()
 
@@ -226,13 +284,68 @@ def displayTop10(data) :
     with col1 :
         container = st.container(border=True, height=450)
         with container :
-            fig = px.pie(TopModuleUseData, names='context_name', values='count', title="Top 10 Log Module", hole=.3)
-            # fig.update_traces(textposition='inside', textinfo='percent + label + value')
-            fig.update_layout(font=dict(size=18))
-            fig.update_layout(legend=dict(font=dict(size=18)))
-            fig.update(layout_showlegend=True)
-            st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+            TopModuleUseData = TopModuleUseData[['count', 'context_name']].rename(columns={"count":"value", "context_name":"name"})
+            TopModuleUseData['value'] = TopModuleUseData['value'].apply(lambda x : ((x/TopModuleUseData['value'].sum())*100).round(2))
+            res = []
+            for i, v in TopModuleUseData.iterrows() :
+                res.append({"value":v['value'], "name":v['name']})
+
+            options = {
+                "tooltip" : {"trigger" : "item"},
+                "toolbox" : {
+                    "feature" : {
+                        "saveAsImage": {}
+                    }
+                },
+                "title" : {
+                    "text" : "Top 10 Log Modules (Log Usage / Accumulated Log Usage) %",
+                    "textStyle" : {
+                        "color" : "#fff"
+                    }
+                    },
+                "legend": {
+                    "top": "middle", 
+                    "left": "right",
+                    "orient" : "vertical",
+                    "aligh" : "right",
+                    "textStyle" :{
+                        "color": "#fff"
+                    }
+                            },
+                "series": [
+                    {
+                        "name": "Log Module",
+                        "type": "pie",
+                        "radius": ["40%", "70%"],
+                        "avoidLabelOverlap": False,
+                        "itemStyle": {
+                            "borderRadius": 10,
+                            "borderColor": "#fff",
+                            "borderWidth": 2,
+                        },
+                        "label": {"show": False, "position": "center"},
+                        "emphasis": {
+                            "label": {"show": True, "fontSize": "20", "fontWeight": "bold"}
+                        },
+                        "labelLine": {"show": False},
+                        "data" : res
+                    }
+                ]    
+            }
             
+            st_echarts(
+                options=options, height='400px'
+            )
+
+            # ======================================================================================================== #
+            # fig = px.pie(TopModuleUseData, names='context_name', values='count', title="Top 10 Log Module", hole=.2)
+            # # fig.update_traces(textposition='inside', textinfo='percent + label + value')
+            # fig.update_layout(font=dict(size=18))
+            # fig.update_layout(legend=dict(font=dict(size=18)))
+            # fig.update(layout_showlegend=True)
+            # st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+            # ======================================================================================================== #
+
             
     with col2 :
         container = st.container(border=True, height=450)
@@ -255,40 +368,91 @@ def displayTop10(data) :
             df = df.replace('', pd.NA).dropna()
             
             appUse_df = df['app_id'].value_counts().reset_index().sort_values(by='count', ascending=False).iloc[:10, :]
+            xaxis = [f"{((value/appUse_df['count'].sum())*100).round(2)}%" for value in appUse_df['count'].values.tolist()]
+            yaxis = appUse_df['app_id'].values.tolist()
+            
             
             appUse_fig = go.Figure(data=[go.Bar(
-                x = appUse_df['count'].values.tolist(),
-                y = appUse_df['app_id'].values.tolist(),
+                x = xaxis,
+                y = yaxis,
                 marker_color = 'crimson',
-                orientation='h'
+                orientation='h',
+                text = xaxis,
+                textposition='outside',
             )])
             
-            appUse_fig.update_layout(title='Top 10 : App Usability',
-                            xaxis_title = "count",
+            appUse_fig.update_layout(title='Top 10 : App Usage (App Usage / Accumulated Usage)',
+                            xaxis_title = "Usage(%)",
                             yaxis_title = "App_id")
                             # height=700,
                             # uniformtext_minsize=8, uniformtext_mode='hide')
             
             st.plotly_chart(appUse_fig, theme='streamlit', use_container_width=True)
+            
+@st.cache_data(ttl=24*60*60)
+def displayAccountUsage(data) :
+    # (usage index / accum)
+    container = st.container(border=True, height=450)
+    with container :
+        import geopandas as gpd
+        ctxtName, messageId = 'accountmanager', 'NL_ACCOUNT_AUTOLOGIN'
+        query_expr = "(context_name == @ctxtName) and (message_id == @messageId)"
+        
+        world_cntryCode = moduleHandler.readCountryJson()  
 
+        df = data.query(query_expr)[['log_date', 'country', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
+        
+        keylst = list(df['message_data'].iloc[0].keys())
+        stdIdx = df.columns.get_loc('message_data')
+        
+        for loc in range(len(keylst)) :
+            df.insert(stdIdx+loc+1,
+            keylst[loc],
+            df['message_data'].apply(lambda x : x.get(keylst[loc], 'None')))
+            
+        df = df.replace('', pd.NA).dropna()
+        
+        accountUsage_df = df[['country', 'account_autologin']].value_counts().reset_index()
+        accountUsageYes_df = accountUsage_df[accountUsage_df['account_autologin']=='Y']
+        accountUsageYes_df = accountUsageYes_df.merge(world_cntryCode, left_on='country', right_on='country2Code')
+
+        xaxis = accountUsageYes_df['name'].values.tolist()
+        yaxis = [((value/accountUsageYes_df['count'].sum())*100).round(2) for value in accountUsageYes_df['count'].values.tolist()]
+        
+        account_fig = go.Figure(data=[go.Bar(
+                x=xaxis, 
+                y=yaxis,
+                marker=dict(color='#0099ff'),
+                text=[f'{y}%' for y in yaxis],
+                textposition='outside',
+        )])
+        # account_fig = px.bar(accountUsageYes_df, x='country', y='count', marker=dict(color='#0099ff'))
+        account_fig.update_layout(title="LG Account Usage Status (Country Account Usage / Accumulated Usage)",
+                                    xaxis_title = "Country",
+                                    yaxis_title = "Usage(%)")
+        
+        
+        st.plotly_chart(account_fig, theme='streamlit', use_container_width=True)
+        
             
 @st.cache_data(experimental_allow_widgets=True)
 def displayRawData(data) :
     filterCols = ['country', 'context_name', 'message_id']
     exceptionCols = ['message_key_1', 'message_value_1',
-        'message_key_2', 'message_value_2', 
+        'message_key_2', 'message_value_2',
         'message_key_3', 'message_value_3',
-        'message_key_4', 'message_value_4', 
+        'message_key_4', 'message_value_4',
         'message_key_5', 'message_value_5',
-        'message_key_6', 'message_value_6', 
+        'message_key_6', 'message_value_6',
         'message_key_7', 'message_value_7',
-        'message_key_8', 'message_value_8', 
+        'message_key_8', 'message_value_8',
         'message_key_9', 'message_value_9',
         'message_key_10', 'message_value_10']
-    
+
+   
     dispCols = [col for col in data.columns if col not in exceptionCols]
-    
-    
+
+
     contextFilter = st.multiselect("👇 Filter Columns", filterCols)
     for col in contextFilter :
         left, right = st.columns((1,20))
@@ -297,7 +461,7 @@ def displayRawData(data) :
             data[col].unique()
         )
         data = data[data[col].isin(user_input)][dispCols]
-        
+       
     st.dataframe(data, use_container_width=True)
 
 
@@ -311,7 +475,7 @@ def displayProgressBar() :
     time.sleep(1)
     my_bar.empty() 
 
-def displayMoudleDataAnalysis(data, msg) :
+def displayMoudleDataAnalysis(data, msg, Total) :
     try :
         module = data['context_name'].unique()[0]
     except :
@@ -321,17 +485,38 @@ def displayMoudleDataAnalysis(data, msg) :
     container = st.container(border=False)
     
     # regardless all msg..,
-    with container : 
-        data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
-        pxData = data[['log_date_dt', 'message_id']].value_counts().reset_index().sort_values(by='log_date_dt', ascending=True)
+    with container :
+        # col1, col2 = st.columns((9,1))
         
-        fig = px.line(pxData, x='log_date_dt', y='count', color='message_id', title=f'{module} Trend', markers=True)
+        # with col1 :
+        data['log_date_dt'] = data['log_date'].apply(lambda x : datetime.strftime(x, '%Y-%m-%d'))
+        # pxData = data[['log_date_dt', 'message_id']].value_counts().reset_index().sort_values(by='log_date_dt', ascending=True)
+        pxData = data['log_date_dt'].value_counts().reset_index().sort_values(by='log_date_dt', ascending=True)
+        
+        # fig = px.line(pxData, x='log_date_dt', y='count', color='message_id', title=f'{module} Trend', markers=True)
+        fig = px.line(pxData, x='log_date_dt', y='count', title=f'{module} Log Time Series', markers=True, text='count')   
+        fig.update_traces(textposition='top center')
         fig.update_layout(margin=dict(l=20, r=20, t=50, b=20),
                         xaxis_title = 'Date',
                         yaxis_title = 'Count')
         fig.update_xaxes(rangemode='tozero', showgrid=False)
         fig.update_yaxes(rangemode='tozero', showgrid=True)
         st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+            
+            
+        # with col2 :
+        #     moduleData = data['context_name'].value_counts().reset_index().sort_values(by='count', ascending=True)
+        #     portion = int(((moduleData['count'].iloc[0]/Total)*100).round(0))
+            
+        #     circularWidget = CircularProgress(
+        #         value = portion,
+        #         label = f"{module} Usage",
+        #         size = "Large",
+        #         color = "blue"
+        #     )
+            
+        #     circularWidget.st_circular_progress()
+
     
     
     container = st.container(border=True)
@@ -412,7 +597,7 @@ def main() :
             if selectedContext == '' :
                 #KPIs Metrics
                 TotalLogCount, TotalModule, TotalUser, ErrorLogCount = calculateKpis(query_data)
-                kpiNames = ["All Events", "All Moduels",'Total User', 'Error Log']
+                kpiNames = ["Accumulated Logs", "Used Moduels",'Users', 'Error']
                 displayKpiMetrics(TotalLogCount, TotalModule, TotalUser, ErrorLogCount, kpiNames)
                 
                             
@@ -424,22 +609,24 @@ def main() :
                 displayChoropleth(query_data)
                 st.divider()
                 
-                
                 # Top10 usage index (rank 10 : stack log module, App usage Idx by SAM)
                 displayTop10(query_data)
                 
-                container = st.container(border=True)
-                with container :
-                    moduleHandler.quicksettingsHandler(data, 'NL_QUICKSETTINGS_VALUE')
+                # LG-Account login 계정 사용성 분석  
+                # NL_ACCOUNT_AUTOLOGIN  AC Off/On 후  자동로그인  완료 "Y", 자동로그인 실패하였다면 "N"
+                displayAccountUsage(query_data)
+                # container = st.container(border=True)
+                # with container :
+                #     moduleHandler.quicksettingsHandler(data, 'NL_QUICKSETTINGS_VALUE')
                     
             # context Name selected    
             # ========================================================================== #
-                
+            TotalLogCount = len(data)
             query_expr = "(context_name == @selectedContext)"
             filterData = query_data.query(query_expr)[['log_date', 'platform' , 'country', 'context_name', 'message_id', 'message_data']].reset_index(drop=True)
             
             if selectedContext != '' :
-                displayMoudleDataAnalysis(filterData, selectedMsgId)
+                displayMoudleDataAnalysis(filterData, selectedMsgId, TotalLogCount)
             # else:
             #     container = st.container(border=True)
             #     with container :
@@ -457,8 +644,8 @@ def main() :
                 
                 
 if __name__ == '__main__' :
-    try :
+    # try :
         main()
-    except Exception as err :
-        st.warning(f"🚨 Error has happend while operating dashboard")
-        st.exception(f"{err}")
+    # except Exception as err :
+    #     st.warning(f"🚨 Error has happend while operating dashboard")
+    #     st.exception(f"{err}")

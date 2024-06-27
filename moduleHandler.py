@@ -8,6 +8,7 @@ from nltk.tag import pos_tag
 import os, sys, json, re
 import pandas as pd
 import plotly.express as px
+import plotly.figure_factory as ff
 import streamlit as st
 import altair as alt
 import nltk
@@ -15,6 +16,7 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import geopandas as gpd
+import numpy as np
 
 def admanagerHandler(data, msg) :
     if vaildCheck(msg) :
@@ -59,27 +61,59 @@ def admanagerHandler(data, msg) :
 # 퀵 설정 메뉴 선택 사용 관련 (사용자가 어떤 퀵 설정 메뉴를 사용하는지 파악하는데 용이)
 # Quicksettings_menu_button은 제외
 # count 1은 제외, game = gameoptimizer
+# 국가 별로 quicksettings_item을 설정해서 기존 quicksettings_item count는 삭제 진행
 def quicksettingsHandler(data, msg) :
     if vaildCheck(msg) :
         return
+
+    cntryCode = readCountryJson()
+    quickData = set_keyData(data, msg)
+    world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+    world_cntryCode = world.merge(cntryCode, left_on='iso_a3', right_on='country3Code')    
+    quickData = quickData.merge(world_cntryCode, left_on='country', right_on='country2Code')
     
-    quickSettingData = set_keyData(data, msg)
     
     if msg == 'NL_QUICKSETTINGS_VALUE' :
-        filtered_data = quickSettingData[quickSettingData['quicksettings_item'] != 'QuickSettings_menu_button']
-        quickSettingsUsability = filtered_data[['quicksettings_item', 'quicksettings_value']].value_counts().reset_index(name='count')
-        quickSettingsUsability = quickSettingsUsability[quickSettingsUsability['count'] > 1]
-        quicksetting_fig = px.bar(quickSettingsUsability, y='quicksettings_item', x='count', color='quicksettings_value', text_auto=True, orientation='h')
-        quicksetting_fig.update_layout(title="Quicksettings_Option Count", xaxis_title = "count", yaxis_title = "Quicksetting Option", height=500)
+        accumulativeRet = quickData[['log_date_dt', 'name']].value_counts().reset_index().sort_values(by='log_date_dt').reset_index(drop=True)
+        appCountRet = quickData[['quicksettings_item','name']].value_counts().reset_index().sort_values(by='count', ascending=False).reset_index(drop=True)
+
+        maxXaxis = accumulativeRet.nlargest(1, 'count')['log_date_dt'].unique()[0]
         
-        st.plotly_chart(quicksetting_fig, theme='streamlit', use_container_width=True) 
+        trend_fig = px.bar(accumulativeRet, x='log_date_dt', y='count', color='name') 
+        trend_fig.update_layout(title="Quicksettings_item Usage Trend (Country)",
+                                xaxis_title = "date",
+                                yaxis_title = "count",
+                                height=500)
+        
+        st.plotly_chart(trend_fig, theme='streamlit', use_container_width=True)
+        
+        UseCountryUnique = list(appCountRet['name'].unique())
+
+        tabSeries = st.tabs(UseCountryUnique)
+        for idx in range(len(tabSeries)) :
+            appUsage = appCountRet[appCountRet['name'] == UseCountryUnique[idx]]
+            appUnique = appUsage['quicksettings_item'].unique()
+            
+            usabilty_fig = go.Figure()
+            usabilty_fig.add_trace(go.Scatter(
+                x = appUsage['count'].unique(),
+                y = appUnique,
+                marker = dict(color='gold', size=12),
+                mode = 'markers'
+            ))
+            
+            usabilty_fig.update_layout(title=f"Quicksettings_item Usage Country : {UseCountryUnique[idx]}", 
+                            xaxis_title = "Usability",
+                            yaxis_title = "quicksettings_item",
+                            height=700)
+            
+            with tabSeries[idx] :
+                st.plotly_chart(usabilty_fig, theme='streamlit', use_container_width=True)
         
         
 def voiceHandler(data, msg) :
     if vaildCheck(msg) :
         return
-    
-    voiceData = set_keyData(data, msg)
     
     #keyword 정리 함수
     def preprocess_text(text):
@@ -115,124 +149,268 @@ def voiceHandler(data, msg) :
     stop_words = stopwords.words('english')
         
     if 'none' not in stop_words:
-         stop_words.append('none')
-            
+        stop_words.append('none')
+    
+    voiceData = set_keyData(data, msg)
+    world_cntryCode = readCountryJson()
+    voiceData = voiceData.merge(world_cntryCode, left_on='country', right_on='country2Code')
+    
+    
+    # ============================================================================================ #
     # 발화: user_utterance, 발화 후 동작 앱: foreground_app, 발화 후 동작 앱에서 액션: main_action
     # voice 검색 결과의 action_type, service_type 분석
     # User_utterance keyword Top 10: 사용자가 발화한 키워드 Top 10 (한글자는 예외처리함)
     # Action App after User_utterance: 발화 후 동작 앱 및 행동(main action)
     if msg == 'NL_RESULT_DATA' :
+        accumulativeRet = voiceData[['log_date_dt', 'name']].value_counts().reset_index().sort_values(by='log_date_dt').reset_index(drop=True)
+        appCountRet = voiceData[['foreground_app','name']].value_counts().reset_index().sort_values(by='count', ascending=False).reset_index(drop=True)
+        
+        trend_fig = px.bar(accumulativeRet, x='log_date_dt', y='count', color='name') 
+
+        trend_fig.update_layout(title="After User_utterance foreground_app (Country)",
+                                xaxis_title = "date",
+                                yaxis_title = "count",
+                                height=500)
+
+        st.plotly_chart(trend_fig, theme='streamlit', use_container_width=True)
         
         # show User's utterance keyword pattern
         ret_c = voiceData['user_utterance']
-        ret_count = ret_c.value_counts().reset_index()
+        ret_count = ret_c.value_counts().reset_index(name= 'count')
         
         # Setting Keyword   
         word_lists = ret_c.apply(preprocess_text)
         all_words = [word for words in word_lists for word in words]
         word_counts = Counter(all_words)
         filtered_keyword_counts = dict(word_counts.most_common(10))
-        filtered_word_counts = dict(word_counts.most_common(20))
+        #filtered_word_counts = dict(word_counts.most_common(20))
         
-        container = st.container(border=True)
-        with container:
-            # User_utterance Keyword Top 10
-            new_ret_a = pd.DataFrame.from_records(list(filtered_keyword_counts.items()), columns=['user_utterance', 'count'])
-            fig = px.bar(new_ret_a, x='user_utterance', y='count', color='user_utterance', title=f'User_utterance keyword Top 10', text_auto=True, labels={'user_utterance': 'User_utterance Keyword'})
+        new_ret_a = pd.DataFrame.from_records(list(filtered_keyword_counts.items()), columns=['user_utterance', 'count'])
+        UseCountryUnique = list(appCountRet['name'].unique())
         
-            #Word Cloud, Dataframe Setting Code
-            wordcloud_list = ' '.join(filtered_word_counts)
-            wordcloud = WordCloud(font_path= 'C:/Windows/Fonts/HMFMPYUN.ttf', max_words=50, max_font_size=300).generate(wordcloud_list)
-            plt.imshow(wordcloud, interpolation='bilinear')
-            plt.axis('off')
+        tabSeries = st.tabs(UseCountryUnique)
+        for idx in range(len(tabSeries)):
+            country = UseCountryUnique[idx]
             
-            count_words = pd.Series(all_words).value_counts().head(10)
+            country_data = appCountRet[appCountRet['name'] == country]
+            appUsage = country_data[country_data['name'] == country]
+            appUnique = appUsage['foreground_app'].unique()
             
-            tab1, tab2 = st.tabs(['Key word top 20', 'Wordcloud & Chart'])
-            with tab1 :
+            country_keyword_counts = voiceData[voiceData['name'] == country]['user_utterance'].value_counts().reset_index(name='count').head(10)
+            country_keyword_counts.rename(columns={'index': 'user_utterance'}, inplace=True)
+            fig = px.bar(country_keyword_counts, x='user_utterance', y='count', color='user_utterance', title=f'Voice/Search Keyword Top 10: {country}',
+                        text_auto=True, labels={'user_utterance': 'Content Keyword'})
+            
+            usabilty_fig = go.Figure()
+            usabilty_fig.add_trace(go.Scatter(
+                x=appUsage['count'].unique(),
+                y=appUnique,
+                marker=dict(color='gold', size=12),
+                mode='markers'
+            ))
+            
+            usabilty_fig.update_layout(title=f"Voice/Search Usage Country: {country}",
+                                    xaxis_title="Usability",
+                                    yaxis_title="Keyword_Tile",
+                                    height=700)
+            
+            with tabSeries[idx]:
+                st.plotly_chart(usabilty_fig, theme='streamlit', use_container_width=True)  
                 st.plotly_chart(fig, theme='streamlit', use_container_width=True)
-            with tab2 :
-                col1, col2 = st.columns(2)
-                with col1 :
-                    container = st.container(border=True, height=600)
-                    with container:
-                        st.pyplot(plt, use_container_width=True)
-                with col2:
-                    container = st.container(border=True, height=600)
-                    with container:
-                        st. dataframe(count_words, use_container_width=True)    
-        
-        container = st.container(border=True)
-        with container:
-            # show User voice main_action pattern info
-            ret = voiceData[[ 'foreground_app', 'main_action']].value_counts().reset_index()
-            fig = px.bar(ret, x='count', y='foreground_app', color='main_action', orientation='h',
-                         barmode='stack', title=f'Action App after User_utterance', text_auto=True)
-            st.plotly_chart(fig, theme='streamlit', use_container_width=True)        
 
     # launch_type: voice or search
     # show select content (Voice search results / Search)
-    # 추천 리스트/음성인식 결과/통합검색 결과 목록에서 선택
-    elif msg == 'NL_SELECT_ITEM' :
-        movie_data = voiceData[voiceData['query']=='movie']
-        voiceData.loc[voiceData['query']== 'movie', 'query']= movie_data['content_title']
+    # 추천 리스트/음성인식/통합검색 결과 컨텐츠 진입율 파악
+    elif msg == 'NL_SELECT_ITEM':
+        accumulativeRet = voiceData[['log_date_dt', 'name']].value_counts().reset_index(name='count').sort_values(by='log_date_dt').reset_index(drop=True)
+        appCountRet = voiceData[['app_id', 'name']].value_counts().reset_index(name='count').sort_values(by='count', ascending=False).reset_index(drop=True)
         
-        # show User's Content keyword pattern
-        ret_c = voiceData['query']
-        ret_count = ret_c.value_counts().reset_index()
+        trend_fig = px.bar(accumulativeRet, x='log_date_dt', y='count', color='name')
+        trend_fig.update_layout(title="Voice/Search Result Logs Trend (Country)",
+                                xaxis_title="date",
+                                yaxis_title="count",
+                                height=500)
+        st.plotly_chart(trend_fig, theme='streamlit', use_container_width=True)
 
+        movie_data = voiceData[voiceData['query'] == 'movie']
+        voiceData.loc[voiceData['query'] == 'movie', 'query'] = movie_data['content_title']
+        
+        ret_c = voiceData['query']
+        ret_count = ret_c.value_counts().reset_index(name='count')
         word_lists = ret_c.apply(preprocess_text)
         all_words = [word for words in word_lists for word in words]
         word_counts = Counter(all_words)
         filtered_keyword_counts = dict(word_counts.most_common(10))
-        filtered_word_counts = dict(word_counts.most_common(20))
         
         new_ret_a = pd.DataFrame.from_records(list(filtered_keyword_counts.items()), columns=['query', 'count'])
-        fig = px.bar(new_ret_a, x='query', y='count', color='query', title=f'Content Keyword Top 10', 
-                     text_auto=True, labels={'query': 'Content Keyword'})
         
-        #Word Cloud Setting Code
-        wordcloud_list = ' '.join(filtered_word_counts)
-        wordcloud = WordCloud(font_path= 'C:/Windows/Fonts/HMFMPYUN.ttf', max_words=50, max_font_size=300).generate(wordcloud_list)
-        plt.imshow(wordcloud, interpolation='bilinear')
-        plt.axis('off')
+        UseCountryUnique = list(appCountRet['name'].unique())
         
-        #Dataframe Setting Code
-        count_words = pd.Series(all_words).value_counts().head(10)
-        
-        tab1, tab2 = st.tabs(['Key word top 10', 'Wordcloud & Chart'])
-        with tab1 :
-            st.plotly_chart(fig, theme='streamlit', use_container_width=True)
-        with tab2 :
-            col1, col2 = st.columns(2)
-            with col1 :
-                container = st.container(border=True, height=600)
-                with container:
-                    st.pyplot(plt, use_container_width=True)
-            with col2:
-                container = st.container( border=True, height=600)
-                with container:
-                    st. dataframe(count_words, use_container_width=True)
+        tabSeries = st.tabs(UseCountryUnique)
+        for idx in range(len(tabSeries)):
+            country = UseCountryUnique[idx]
+            
+            country_data = appCountRet[appCountRet['name'] == country]
+            appUsage = country_data[country_data['name'] == country]
+            appUnique = appUsage['app_id'].unique()
+            
+            country_keyword_counts = voiceData[voiceData['name'] == country]['query'].value_counts().reset_index(name='count').head(10)
+            country_keyword_counts.rename(columns={'index': 'query'}, inplace=True)
+            fig = px.bar(country_keyword_counts, x='query', y='count', color='query', title=f'Voice/Search Keyword Top 10: {country}',
+                        text_auto=True, labels={'query': 'Content Keyword'})
+            
+            usabilty_fig = go.Figure()
+            usabilty_fig.add_trace(go.Scatter(
+                x=appUsage['count'].unique(),
+                y=appUnique,
+                marker=dict(color='gold', size=12),
+                mode='markers'
+            ))
+            
+            usabilty_fig.update_layout(title=f"Voice/Search Usage Country: {country}",
+                                    xaxis_title="Usability",
+                                    yaxis_title="Keyword_Tile",
+                                    height=700)
+            
+            with tabSeries[idx]:
+                st.plotly_chart(usabilty_fig, theme='streamlit', use_container_width=True)
+                st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+
             
     # show usability of provided keywords on search
     # 키워드 타일(통합검색) 사용성 파악
-    elif msg == 'NL_SELECT_KEYWORD' :
-        ret = voiceData[['keyword_type', 'keyword']].value_counts().reset_index()
-        fig = px.bar(ret, x='keyword_type', y='count', color='keyword',
-                        barmode='group', title=f'{msg} count', text_auto=True)
-        st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+    elif msg == 'NL_SELECT_KEYWORD':
+        accumulativeRet = voiceData[['log_date_dt', 'name']].value_counts().reset_index().sort_values(by='log_date_dt').reset_index(drop=True)
+        appCountRet = voiceData[['keyword', 'name']].value_counts().reset_index().sort_values(by='count', ascending=False).reset_index(drop=True)
+        
+        # Keyword_Tile(Search) Trend (country)
+        trend_fig = px.bar(accumulativeRet, x='log_date_dt', y='count', color='name')
+        trend_fig.update_layout(title="Keyword_Tile(Search) Trend (Country)",
+                                xaxis_title="date",
+                                yaxis_title="count",
+                                height=500)
+        st.plotly_chart(trend_fig, theme='streamlit', use_container_width=True)
+
+        # Keyword_Tile(Search) Usage Time (Country)
+        # data['log_time_only'] = pd.to_datetime(data['log_date_dt']).dt.time
+        # bins = [0, 4, 8, 12, 16, 20, 24]
+        # labels = ['Late Night(0~4)', 'Early Morning(4~8)', 'Morning(8~12)', 'Afternoon(12~16)', 'Evening(16~20)', 'Night(20~24)']
+        # data['time_category'] = pd.cut(data['log_time_only'].apply(lambda x: x.hour), bins=bins, labels=labels, right=False)
+        # time_counts = data.groupby(['time_category', 'country']).size().reset_index(name='count')
+        # fig = px.bar(time_counts, x='time_category', y='count', color='country', barmode='group', title='Keyword_Tile(Search) Usage Time(Country)', text_auto=True)
+        # st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+        # print(time_counts)
+        
+        # Keyword_Tile Usage Country
+        UseCountryUnique = list(appCountRet['name'].unique())
+
+        tabSeries = st.tabs(UseCountryUnique)
+        for idx in range(len(tabSeries)) :
+            appUsage = appCountRet[appCountRet['name'] == UseCountryUnique[idx]]
+            appUnique = appUsage['keyword'].unique()
+            
+            usabilty_fig = go.Figure()
+            usabilty_fig.add_trace(go.Scatter(
+                x = appUsage['count'].unique(),
+                y = appUnique,
+                marker = dict(color='gold', size=12),
+                mode = 'markers'
+            ))
+            
+            usabilty_fig.update_layout(title=f"Keyword_Tile Usage Country : {UseCountryUnique[idx]}", 
+                            xaxis_title = "Usability",
+                            yaxis_title = "Keyword_Tile",
+                            height=700)
+            
+            with tabSeries[idx] :
+                st.plotly_chart(usabilty_fig, theme='streamlit', use_container_width=True)
     
     # mrcu_key:매직리모컨, voice_far:원거리 음성, mobile: ThinQ앱, voiceGuide:음성 도움말
     # 음성인식 사용상황 파악
     elif msg == 'NL_ACTIVATE_VOICE' :
+        accumulativeRet = voiceData[['log_date_dt', 'name']].value_counts().reset_index().sort_values(by='log_date_dt').reset_index(drop=True)
+        appCountRet = voiceData[['foreground_app','name']].value_counts().reset_index().sort_values(by='count', ascending=False).reset_index(drop=True)
+
+        maxXaxis = accumulativeRet.nlargest(1, 'count')['log_date_dt'].unique()[0]
+        
+        trend_fig = px.bar(accumulativeRet, x='log_date_dt', y='count', color='name') 
+
+        trend_fig.update_layout(title="Voice Usage Trend (Country)",
+                                xaxis_title = "date",
+                                yaxis_title = "count",
+                                height=500)
+
+        st.plotly_chart(trend_fig, theme='streamlit', use_container_width=True)
+ 
+        UseCountryUnique = list(appCountRet['name'].unique())
+
+        tabSeries = st.tabs(UseCountryUnique)
+        for idx in range(len(tabSeries)) :
+            appUsage = appCountRet[appCountRet['name'] == UseCountryUnique[idx]]
+            appUnique = appUsage['foreground_app'].unique()
+            
+            usabilty_fig = go.Figure()
+            usabilty_fig.add_trace(go.Scatter(
+                x = appUsage['count'].unique(),
+                y = appUnique,
+                marker = dict(color='gold', size=12),
+                mode = 'markers'
+            ))
+            
+            usabilty_fig.update_layout(title=f"Voice foreground_app Usage Country : {UseCountryUnique[idx]}", 
+                            xaxis_title = "Usability",
+                            yaxis_title = "Search foreground_app",
+                            height=700)
+            
+            with tabSeries[idx] :
+                st.plotly_chart(usabilty_fig, theme='streamlit', use_container_width=True)
+        
         ret = voiceData[[ 'foreground_app', 'input_type']].value_counts().reset_index()
         fig = px.treemap(ret, path=[px.Constant("all"),'foreground_app','input_type'], values='count', color='foreground_app', title='input_type count')
         st.plotly_chart(fig, use_container_width=True)
 
     # mrcu_key:매직리모컨, voice_far:원거리 음성, mobile: ThinQ앱, voiceGuide:음성 도움말
+    # 통합검색 실행 방법 확인
     elif msg == 'NL_ACTIVATE_SEARCH':
+        accumulativeRet = voiceData[['log_date_dt', 'name']].value_counts().reset_index().sort_values(by='log_date_dt').reset_index(drop=True)
+        appCountRet = voiceData[['foreground_app','name']].value_counts().reset_index().sort_values(by='count', ascending=False).reset_index(drop=True)
+
+        maxXaxis = accumulativeRet.nlargest(1, 'count')['log_date_dt'].unique()[0]
+        
+        trend_fig = px.bar(accumulativeRet, x='log_date_dt', y='count', color='name') 
+
+        trend_fig.update_layout(title="Search Usage Method Trend Trend (Country)",
+                                xaxis_title = "date",
+                                yaxis_title = "count",
+                                height=500)
+
+        st.plotly_chart(trend_fig, theme='streamlit', use_container_width=True)
+        
+        UseCountryUnique = list(appCountRet['name'].unique())
+
+        tabSeries = st.tabs(UseCountryUnique)
+        for idx in range(len(tabSeries)) :
+            appUsage = appCountRet[appCountRet['name'] == UseCountryUnique[idx]]
+            appUnique = appUsage['foreground_app'].unique()
+            
+            usabilty_fig = go.Figure()
+            usabilty_fig.add_trace(go.Scatter(
+                x = appUsage['count'].unique(),
+                y = appUnique,
+                marker = dict(color='gold', size=12),
+                mode = 'markers'
+            ))
+            
+            usabilty_fig.update_layout(title=f"Search foreground_app Usage Country : {UseCountryUnique[idx]}", 
+                            xaxis_title = "Usability",
+                            yaxis_title = "voice_input foreground_app",
+                            height=700)
+            
+            with tabSeries[idx] :
+                st.plotly_chart(usabilty_fig, theme='streamlit', use_container_width=True)
+        
         ret = voiceData[[ 'foreground_app', 'input_type']].value_counts().reset_index()
-        fig = px.treemap(ret, path=[px.Constant("all"),'foreground_app','input_type'], values='count', color='input_type', title='input_type count')
+        fig = px.treemap(ret, path=[px.Constant("all"),'foreground_app','input_type'], values='count', color='input_type', title='voice input_type count')
         st.plotly_chart(fig, use_container_width=True)
     
     else :
@@ -291,11 +469,8 @@ def homeHandler(data, msg) :
     if vaildCheck(msg) :
         return
     
-    cntryCode = readCountryJson()
+    world_cntryCode = readCountryJson()
     homeData = set_keyData(data, msg)
-    world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
-    world_cntryCode = world.merge(cntryCode, left_on='iso_a3', right_on='country3Code')    
-    
     homeData = homeData.merge(world_cntryCode, left_on='country', right_on='country2Code')
     
     # 1. 사용성 분석 (NL_APP_LAUNCH) 국가별 분석 필요
@@ -449,17 +624,25 @@ def homeconnectHandler(data, msg) :
         st.plotly_chart(inputsource_fig, theme='streamlit', use_container_width=True)
             
     
-def thermalHandler(data, msg) : ## test ##
+def thermalHandler(data, msg) : ## test ## 
     if vaildCheck(msg) :
         return
     
     if msg == 'NL_CHIP_THERMAL' :
+        '''
+        soc_temperature : SoC 온도 데이터 제공
+        core_iddq, cpu_iddq : 무부하상태의 전류값 출력(누설전류)
+        '''
         keyLst = ['soc_temperature', 'core_iddq', 'cpu_iddq']
         for key in keyLst :
             thermalData = data
             thermalData[key] = data['message_data'].apply(lambda x : x.get(key, "None"))
 
     # split
+    #### distplot #### not create tab series, just check to see distribution
+        group_labels = keyLst
+        colors = ['#393E46', '#2BCDC1', '#F66095']
+    
         thermalTempeatureData = thermalData[['log_date', 'context_name', 'message_id', 'message_data', 'soc_temperature']].sort_values(by='log_date', ascending=True)
         thermalTempeatureData = thermalTempeatureData.drop(thermalTempeatureData[thermalTempeatureData['soc_temperature'] == 'None'].index)
 
@@ -467,33 +650,18 @@ def thermalHandler(data, msg) : ## test ##
         coreIddqData = coreIddqData.drop(coreIddqData[coreIddqData['core_iddq'] == 'None'].index)
         
         cpuIddqData = thermalData[['log_date', 'context_name', 'message_id', 'message_data', 'cpu_iddq']].sort_values(by='log_date', ascending=True)
+        
         cpuIddqData = cpuIddqData.drop(cpuIddqData[cpuIddqData['cpu_iddq'] == 'None'].index)
 
-        fancorr_fig = px.density_heatmap(x=thermalTempeatureData['soc_temperature'], y=coreIddqData['core_iddq'], marginal_x='histogram', marginal_y='histogram')
-        fancorr_fig.update_layout(title="temperature with core", 
-                xaxis_title = "Tempeature",
-                yaxis_title = "core",
-                height=500)
+        hist_data = [np.array(thermalTempeatureData['soc_temperature'].values.tolist()).astype('int'), np.array(coreIddqData['core_iddq'].values.tolist()).astype('int'), np.array(cpuIddqData['cpu_iddq'].values.tolist()).astype('int')]
+
+        fig = ff.create_distplot(hist_data, group_labels, colors=colors, show_curve=True)
+    
+        fig.update_layout(title='Thermal Data Distribution',
+                            height = 500)
         
-        fancorr2_fig = px.density_heatmap(x=thermalTempeatureData['soc_temperature'], y=cpuIddqData['cpu_iddq'], marginal_x='histogram', marginal_y='histogram')
-        fancorr2_fig.update_layout(title="temperature with cpu", 
-                xaxis_title = "Tempeature",
-                yaxis_title = "cpu",
-                height=500)
-        
-        fancorr3_fig = px.density_heatmap(x=coreIddqData['core_iddq'], y=cpuIddqData['cpu_iddq'], marginal_x='histogram', marginal_y='histogram')
-        fancorr3_fig.update_layout(title="core with cpu", 
-                xaxis_title = "core",
-                yaxis_title = "cpu",
-                height=500)
-        
-        tab1, tab2, tab3 = st.tabs(['var1', 'var2', 'var3'])
-        with tab1 :
-            st.plotly_chart(fancorr_fig, theme='streamlit', use_container_width=True)
-        with tab2 :
-            st.plotly_chart(fancorr2_fig, theme='streamlit', use_container_width=True)
-        with tab3 :
-            st.plotly_chart(fancorr3_fig, theme='streamlit', use_container_width=True)
+        st.plotly_chart(fig, theme='streamlit', use_container_width=True)
+
         
 def nudgeHandler(data, msg) :
     if vaildCheck(msg) :
@@ -583,7 +751,22 @@ def set_keyData(data, msg) :
     moduleData = data[data['message_id'] == msg]
     # moduleData['message_data'] = moduleData['message_data'].apply(lambda x : preprocessing_data(x))
     try :
-        keylst = list(moduleData['message_data'].iloc[0].keys())
+        # keylst = list(moduleData['message_data'].iloc[0].keys())
+        
+        # data 형식이 다를 수도 있는 case가 있음
+        # set -> list
+        ## test ##
+        
+        uniqueKeylist = []
+        keydata = moduleData['message_data'].values.tolist()
+        
+        for data in keydata :
+            for key in data.keys() :
+                uniqueKeylist.append(key)
+        
+        uniqueKeySet = set(uniqueKeylist) # 중복 제거
+        keylst = list(uniqueKeySet)
+        
     except :
         return
     
@@ -622,5 +805,8 @@ def readCountryJson() :
         js = json.loads(f.read())
     
     cntryCode = pd.DataFrame(js, columns=['country2Code', 'country3Code'])
+    world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+    world_cntryCode = world.merge(cntryCode, left_on='iso_a3', right_on='country3Code')   
+
     
-    return cntryCode
+    return world_cntryCode
