@@ -5,4 +5,6 @@ wordcloud
 nltk
 konlpy
 matplotlib
-geopandas
+geopandas>=0.12
+streamlit-echarts
+streamlit-shadcn-ui
