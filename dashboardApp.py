@@ -1,4 +1,3 @@
-from st_circular_progress import CircularProgress
 from streamlit_echarts import st_echarts
 from datetime import datetime
 from io import BytesIO
